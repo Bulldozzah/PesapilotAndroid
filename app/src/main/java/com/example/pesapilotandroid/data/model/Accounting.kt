@@ -167,6 +167,25 @@ data class Customer(
     val createdAt: String? = null
 )
 
+// Matches: public.account_subcategories table
+@Serializable
+data class AccountSubcategory(
+    val id: String = "",
+    @SerialName("user_business_id")
+    val userBusinessId: String = "",
+    @SerialName("user_id")
+    val userId: String = "",
+    @SerialName("account_type")
+    val accountType: String = "",
+    val name: String = "",
+    @SerialName("display_order")
+    val displayOrder: Int = 0,
+    @SerialName("is_system")
+    val isSystem: Boolean = false,
+    @SerialName("created_at")
+    val createdAt: String? = null
+)
+
 // Matches: public.account_type enum
 enum class AccountType(val value: String, val displayName: String) {
     ASSET("asset", "Asset"),

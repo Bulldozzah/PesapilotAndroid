@@ -251,6 +251,126 @@ class AccountingRepository @Inject constructor(
         }
     }
 
+    // Account Subcategories
+    suspend fun getAccountSubcategories(userId: String, businessId: String): Result<List<AccountSubcategory>> {
+        return try {
+            val subs = supabaseClient.postgrest
+                .from("account_subcategories")
+                .select {
+                    filter {
+                        eq("user_id", userId)
+                        eq("user_business_id", businessId)
+                    }
+                    order("display_order", io.github.jan.supabase.postgrest.query.Order.ASCENDING)
+                }
+                .decodeList<AccountSubcategory>()
+            Result.success(subs)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun createAccountSubcategory(sub: AccountSubcategory): Result<AccountSubcategory> {
+        return try {
+            val created = supabaseClient.postgrest
+                .from("account_subcategories")
+                .insert(sub) { select() }
+                .decodeSingle<AccountSubcategory>()
+            Result.success(created)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteAccountSubcategory(subId: String): Result<Unit> {
+        return try {
+            supabaseClient.postgrest.from("account_subcategories").delete { filter { eq("id", subId) } }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Seed default COA
+    suspend fun seedDefaultAccounts(userId: String, businessId: String): Result<Unit> {
+        return try {
+            val existing = supabaseClient.postgrest
+                .from("chart_of_accounts")
+                .select { filter { eq("user_business_id", businessId) } }
+                .decodeList<ChartOfAccount>()
+            val existingCodes = existing.map { it.code }.toSet()
+
+            val defaults = getDefaultChartOfAccounts(userId, businessId)
+                .filter { it.code !in existingCodes }
+
+            if (defaults.isNotEmpty()) {
+                supabaseClient.postgrest.from("chart_of_accounts").insert(defaults)
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun seedDefaultSubcategories(userId: String, businessId: String): Result<Unit> {
+        return try {
+            val defaults = getDefaultSubcategories(userId, businessId)
+            for (sub in defaults) {
+                try {
+                    supabaseClient.postgrest.from("account_subcategories").insert(sub)
+                } catch (_: Exception) { /* skip duplicates */ }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Get entries with lines and account info
+    suspend fun getJournalEntriesWithLines(userId: String, businessId: String): Result<List<JournalEntry>> {
+        return try {
+            val entries = supabaseClient.postgrest
+                .from("journal_entries")
+                .select {
+                    filter {
+                        eq("user_id", userId)
+                        eq("user_business_id", businessId)
+                    }
+                    order("entry_date", io.github.jan.supabase.postgrest.query.Order.DESCENDING)
+                }
+                .decodeList<JournalEntry>()
+            Result.success(entries)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun getLinesForEntries(entryIds: List<String>): Result<List<JournalEntryLine>> {
+        if (entryIds.isEmpty()) return Result.success(emptyList())
+        return try {
+            val lines = supabaseClient.postgrest
+                .from("journal_lines")
+                .select {
+                    filter {
+                        isIn("journal_entry_id", entryIds)
+                    }
+                }
+                .decodeList<JournalEntryLine>()
+            Result.success(lines)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteJournalEntryLines(entryId: String): Result<Unit> {
+        return try {
+            supabaseClient.postgrest.from("journal_lines").delete { filter { eq("journal_entry_id", entryId) } }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     // Contacts
     suspend fun getContacts(userId: String, businessId: String? = null, contactType: String? = null): Result<List<Contact>> {
         return try {

@@ -2,74 +2,65 @@ package com.example.pesapilotandroid.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Primary - Green (Money/Finance theme)
-val Primary = Color(0xFF10B981)
-val PrimaryLight = Color(0xFF34D399)
-val PrimaryDark = Color(0xFF059669)
-val OnPrimary = Color(0xFFFFFFFF)
+// ─── Navy Trust Palette ──────────────────────────────────────────────────────
 
-// Secondary - Blue
-val Secondary = Color(0xFF3B82F6)
-val SecondaryLight = Color(0xFF60A5FA)
-val SecondaryDark = Color(0xFF2563EB)
-val OnSecondary = Color(0xFFFFFFFF)
+// App surfaces
+val AppBackground      = Color(0xFFF5F7FB)
+val AppCard            = Color(0xFFFFFFFF)
+val AppText            = Color(0xFF1A2035)
+val AppPrimary         = Color(0xFF1A2B5E)
+val AppPrimaryText     = Color(0xFFF7F9FD)
+val AppAccentBlue      = Color(0xFF4C7FBD)
+val AppSecondaryBg     = Color(0xFFEEF0F7)
+val AppMutedBg         = Color(0xFFF1F2F7)
+val AppMutedText       = Color(0xFF7A7E90)
+val AppBorder          = Color(0xFFDFE1EC)
+val AppInputBorder     = Color(0xFFE3E5EF)
+val AppGold            = Color(0xFFC9A620)
+val AppGreenSuccess    = Color(0xFF28A87A)
+val AppAmberWarning    = Color(0xFFE0A020)
+val AppRedDestructive  = Color(0xFFCC4433)
 
-// Tertiary - Amber
-val Tertiary = Color(0xFFF59E0B)
-val TertiaryLight = Color(0xFFFBBF24)
-val TertiaryDark = Color(0xFFD97706)
-val OnTertiary = Color(0xFF000000)
+// Sidebar
+val SidebarBackground  = Color(0xFF101E3A)
+val SidebarText        = Color(0xFFE0E4EF)
+val SidebarActiveBg    = Color(0xFF1A2B50)
+val SidebarActiveText  = Color(0xFFF7F9FD)
+val SidebarIconDefault = Color(0xFF9BA8C4)
+val SidebarIconActive  = Color(0xFFFFFFFF)
+val SidebarBorder      = Color(0xFF1D2E4E)
+val SidebarLogoBg      = Color(0xFF4C7FBD)
 
-// Background & Surface - Light
-val BackgroundLight = Color(0xFFF9FAFB)
-val SurfaceLight = Color(0xFFFFFFFF)
-val SurfaceVariantLight = Color(0xFFF3F4F6)
-val OnBackgroundLight = Color(0xFF111827)
-val OnSurfaceLight = Color(0xFF1F2937)
-val OnSurfaceVariantLight = Color(0xFF6B7280)
+// Dark mode
+val DarkBackground     = Color(0xFF0F1729)
+val DarkCard           = Color(0xFF141D35)
+val DarkText           = Color(0xFFF2F4FA)
+val DarkPrimary        = Color(0xFF6A99D4)
+val DarkMutedText      = Color(0xFF8A8FA6)
+val DarkBorder         = Color(0x1FFFFFFF)
 
-// Background & Surface - Dark
-val BackgroundDark = Color(0xFF111827)
-val SurfaceDark = Color(0xFF1F2937)
-val SurfaceVariantDark = Color(0xFF374151)
-val OnBackgroundDark = Color(0xFFF9FAFB)
-val OnSurfaceDark = Color(0xFFF3F4F6)
-val OnSurfaceVariantDark = Color(0xFF9CA3AF)
-
-// Error
-val Error = Color(0xFFEF4444)
-val ErrorLight = Color(0xFFF87171)
-val OnError = Color(0xFFFFFFFF)
-
-// Success
-val Success = Color(0xFF22C55E)
-val SuccessLight = Color(0xFF4ADE80)
-
-// Warning
-val Warning = Color(0xFFF59E0B)
-val WarningLight = Color(0xFFFBBF24)
-
-// Info
-val Info = Color(0xFF3B82F6)
-val InfoLight = Color(0xFF60A5FA)
+// Semantic aliases
+val Success  = AppGreenSuccess
+val Warning  = AppAmberWarning
+val Error    = AppRedDestructive
+val OnError  = Color(0xFFFFFFFF)
 
 // Chart Colors
 val ChartColors = listOf(
-    Color(0xFF10B981),
-    Color(0xFF3B82F6),
-    Color(0xFFF59E0B),
-    Color(0xFFEF4444),
+    AppGreenSuccess,
+    AppAccentBlue,
+    AppGold,
+    AppRedDestructive,
     Color(0xFF8B5CF6),
     Color(0xFFEC4899),
     Color(0xFF06B6D4),
     Color(0xFF84CC16)
 )
 
-// Legacy colors for compatibility
-val Purple80 = PrimaryLight
-val PurpleGrey80 = SecondaryLight
-val Pink80 = TertiaryLight
-
-val Purple40 = Primary
-val PurpleGrey40 = Secondary
-val Pink40 = Tertiary
+// Legacy compat aliases
+val Purple80      = AppAccentBlue
+val PurpleGrey80  = AppMutedText
+val Pink80        = AppGold
+val Purple40      = AppPrimary
+val PurpleGrey40  = AppMutedText
+val Pink40        = AppGold

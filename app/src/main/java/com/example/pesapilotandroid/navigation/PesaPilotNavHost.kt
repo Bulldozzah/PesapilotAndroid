@@ -33,7 +33,6 @@ import com.example.pesapilotandroid.ui.screens.money.BankAccountsScreen
 import com.example.pesapilotandroid.ui.screens.money.IncomeExpensesScreen
 import com.example.pesapilotandroid.ui.screens.money.JournalEntryDetailScreen
 import com.example.pesapilotandroid.ui.screens.money.MoneyScreen
-import com.example.pesapilotandroid.ui.screens.money.ReportDetailScreen
 import com.example.pesapilotandroid.ui.screens.money.ReportsScreen
 import com.example.pesapilotandroid.ui.screens.money.SavingsGoalsScreen
 import com.example.pesapilotandroid.ui.screens.money.VendorsCustomersScreen
@@ -170,7 +169,7 @@ fun PesaPilotNavHost(
         }
 
         composable<NavRoute.Reports> {
-            ReportsScreen(navController = navController)
+            ReportsScreen()
         }
 
         composable<NavRoute.BankAccounts> {
@@ -189,13 +188,6 @@ fun PesaPilotNavHost(
             )
         }
 
-        composable<NavRoute.ReportDetail> { backStackEntry ->
-            val route = backStackEntry.toRoute<NavRoute.ReportDetail>()
-            ReportDetailScreen(
-                reportType = route.reportType,
-                navController = navController
-            )
-        }
 
         // Funding
         composable<NavRoute.Funding> {

@@ -33,8 +33,7 @@ sealed interface NavRoute {
     @Serializable data object BankAccounts : NavRoute
     @Serializable data object VendorsCustomers : NavRoute
     @Serializable data class JournalEntryDetail(val entryId: String?) : NavRoute
-    @Serializable data class ReportDetail(val reportType: String) : NavRoute
-
+    
     // Funding routes
     @Serializable data object Funding : NavRoute
     @Serializable data object Microfinance : NavRoute

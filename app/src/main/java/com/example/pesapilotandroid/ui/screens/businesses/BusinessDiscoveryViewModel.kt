@@ -50,16 +50,25 @@ class BusinessDiscoveryViewModel @Inject constructor(
     }
 
     fun selectCategory(category: BusinessCategory?) {
+        _uiState.update { it.copy(selectedCategory = category) }
+        applyFilters()
+    }
+
+    fun setSearchQuery(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
+        applyFilters()
+    }
+
+    private fun applyFilters() {
         _uiState.update { state ->
-            val filtered = if (category == null) {
-                state.templates
-            } else {
-                state.templates.filter { it.categoryId == category.id }
-            }
-            state.copy(
-                selectedCategory = category,
-                filteredTemplates = filtered
-            )
+            val filtered = state.templates
+                .filter { t ->
+                    (state.selectedCategory == null || t.categoryId == state.selectedCategory.id) &&
+                    (state.searchQuery.isBlank() ||
+                        t.name.contains(state.searchQuery, ignoreCase = true) ||
+                        t.description.orEmpty().contains(state.searchQuery, ignoreCase = true))
+                }
+            state.copy(filteredTemplates = filtered)
         }
     }
 }
@@ -69,5 +78,6 @@ data class BusinessDiscoveryUiState(
     val categories: List<BusinessCategory> = emptyList(),
     val templates: List<BusinessTemplate> = emptyList(),
     val filteredTemplates: List<BusinessTemplate> = emptyList(),
-    val selectedCategory: BusinessCategory? = null
+    val selectedCategory: BusinessCategory? = null,
+    val searchQuery: String = ""
 )
