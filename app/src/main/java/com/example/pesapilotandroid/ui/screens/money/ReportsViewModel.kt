@@ -117,6 +117,27 @@ class ReportsViewModel @Inject constructor(
         return "${acct.code} ${acct.name}"
     }
 
+    private fun dayBefore(date: String): String = LocalDate.parse(date).minusDays(1).toString()
+
+    private fun isOperatingIncome(a: ChartOfAccount) =
+        a.type == "income" || a.accountType.equals("Revenue", true)
+
+    /**
+     * Signed net income from a per-account balance function (balance = debit − credit).
+     * Credit-normal income contributes −balance so contra-revenue (a debit balance, e.g.
+     * Sales Returns) correctly REDUCES income instead of being added via abs(); debit-normal
+     * expense/COGS contribute +balance. Includes other income/expense.
+     */
+    private fun netIncomeFor(bal: (String) -> Double): Double {
+        val accts = _uiState.value.accounts
+        val rev = accts.filter { isOperatingIncome(it) }.sumOf { -bal(it.id) }
+        val cogs = accts.filter { it.type == "cogs" }.sumOf { bal(it.id) }
+        val exp = accts.filter { it.type == "expense" }.sumOf { bal(it.id) }
+        val oInc = accts.filter { it.type == "other_income" }.sumOf { -bal(it.id) }
+        val oExp = accts.filter { it.type == "other_expense" }.sumOf { bal(it.id) }
+        return (rev - cogs - exp) + oInc - oExp
+    }
+
     // ─── Report data classes ──────────────────────────────────────────────
 
     data class ReportRow(val label: String, val value: Double, val isBold: Boolean = false,
@@ -200,26 +221,24 @@ class ReportsViewModel @Inject constructor(
         val otherIncomeAccounts = _uiState.value.accounts.filter { it.type == "other_income" }
         val otherExpenseAccounts = _uiState.value.accounts.filter { it.type == "other_expense" }
 
+        // Signed values: credit-normal income shown as −balance (contra-revenue appears
+        // negative and nets the total down); debit-normal expense/COGS shown as +balance.
+        // Rows with a zero balance are dropped.
         val revenueRows = revenueAccounts.map { acct ->
-            val b = balanceInRange(acct.id, from, to)
-            ReportRow("${acct.code} ${acct.name}", kotlin.math.abs(b.balance))
-        }
+            ReportRow("${acct.code} ${acct.name}", -balanceInRange(acct.id, from, to).balance)
+        }.filter { it.value != 0.0 }
         val cogsRows = cogsAccounts.map { acct ->
-            val b = balanceInRange(acct.id, from, to)
-            ReportRow("${acct.code} ${acct.name}", kotlin.math.abs(b.balance))
-        }
+            ReportRow("${acct.code} ${acct.name}", balanceInRange(acct.id, from, to).balance)
+        }.filter { it.value != 0.0 }
         val expenseRows = expenseAccounts.map { acct ->
-            val b = balanceInRange(acct.id, from, to)
-            ReportRow("${acct.code} ${acct.name}", kotlin.math.abs(b.balance))
-        }
+            ReportRow("${acct.code} ${acct.name}", balanceInRange(acct.id, from, to).balance)
+        }.filter { it.value != 0.0 }
         val otherIncomeRows = otherIncomeAccounts.map { acct ->
-            val b = balanceInRange(acct.id, from, to)
-            ReportRow("${acct.code} ${acct.name}", kotlin.math.abs(b.balance))
-        }
+            ReportRow("${acct.code} ${acct.name}", -balanceInRange(acct.id, from, to).balance)
+        }.filter { it.value != 0.0 }
         val otherExpenseRows = otherExpenseAccounts.map { acct ->
-            val b = balanceInRange(acct.id, from, to)
-            ReportRow("${acct.code} ${acct.name}", kotlin.math.abs(b.balance))
-        }
+            ReportRow("${acct.code} ${acct.name}", balanceInRange(acct.id, from, to).balance)
+        }.filter { it.value != 0.0 }
 
         val revTotal = revenueRows.sumOf { it.value }
         val cogsTotal = cogsRows.sumOf { it.value }
@@ -246,16 +265,23 @@ class ReportsViewModel @Inject constructor(
         val liabilityRows = liabilities.map { acct ->
             ReportRow("${acct.code} ${acct.name}", -balanceUpTo(acct.id, endDate).balance)
         }
-        val equityRows = equity.map { acct ->
+        val equityAccountRows = equity.map { acct ->
             ReportRow("${acct.code} ${acct.name}", -balanceUpTo(acct.id, endDate).balance)
         }
 
         val totalAssets = assetRows.sumOf { it.value }
         val totalLiabilities = liabilityRows.sumOf { it.value }
-        val equitySum = equityRows.sumOf { it.value }
+        val equitySum = equityAccountRows.sumOf { it.value }
 
         val pnl = computePnL(from, to)
-        val totalEquity = equitySum + pnl.netIncome
+        // Income/expense accounts are never closed to equity, so prior-period profit must be
+        // added back as retained earnings or the sheet won't balance for any period that
+        // doesn't start at inception. priorRetained = net income from inception to day-before-start.
+        val priorRetained = netIncomeFor { balanceUpTo(it, dayBefore(from)).balance }
+        val equityRows = if (kotlin.math.abs(priorRetained) > 0.005) {
+            equityAccountRows + ReportRow("Retained Earnings (prior periods)", priorRetained)
+        } else equityAccountRows
+        val totalEquity = equitySum + priorRetained + pnl.netIncome
         val isBalanced = kotlin.math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01
 
         return BalanceSheetData(assetRows, liabilityRows, equityRows, totalAssets, totalLiabilities, totalEquity, pnl.netIncome, isBalanced)
@@ -270,7 +296,8 @@ class ReportsViewModel @Inject constructor(
         }
         val cashIds = cashAccounts.map { it.id }.toSet()
 
-        val opening = cashAccounts.sumOf { balanceUpTo(it.id, from).balance }
+        val dayBefore = java.time.LocalDate.parse(from).minusDays(1).toString()
+        val opening = cashAccounts.sumOf { balanceUpTo(it.id, dayBefore).balance }
         var operating = 0.0; var investing = 0.0; var financing = 0.0
         val opIn = mutableListOf<Pair<String, Double>>()
         val opOut = mutableListOf<Pair<String, Double>>()
@@ -292,10 +319,12 @@ class ReportsViewModel @Inject constructor(
             val nonCashAcct = _uiState.value.accounts.find { it.id == nonCashLines.first().accountId }
             val ncName = nonCashAcct?.name ?: "Other"
             val ncType = nonCashAcct?.type ?: ""
+            val ncCode = nonCashAcct?.code ?: ""
 
             val bucket: Int = when {
                 ncType == "equity" || ncName.matches(Regex(".*(loan|capital|dividend).*", RegexOption.IGNORE_CASE)) -> 2
-                ncName.matches(Regex(".*(equipment|property|machinery|vehicle|building).*", RegexOption.IGNORE_CASE)) -> 1
+                ncName.matches(Regex(".*(ppe|equipment|property|machinery|vehicle|building|furniture|fixture|land|intangible).*", RegexOption.IGNORE_CASE)) ||
+                    (ncType == "asset" && ncCode.matches(Regex("^1[5-6]\\d{2}$"))) -> 1
                 else -> 0
             }
 
@@ -329,7 +358,10 @@ class ReportsViewModel @Inject constructor(
     fun computeGeneralLedger(from: String, to: String): List<LedgerAccount> {
         val result = mutableListOf<LedgerAccount>()
         for (acct in _uiState.value.accounts) {
-            var running = 0.0
+            // Carry the balance from before the period forward so the running balance is the
+            // true account balance, not just in-period movement.
+            val opening = balanceUpTo(acct.id, dayBefore(from)).balance
+            var running = opening
             val rows = mutableListOf<LedgerRow>()
             for (entry in _uiState.value.entries) {
                 if (entry.entryDate < from || entry.entryDate > to) continue
@@ -340,8 +372,9 @@ class ReportsViewModel @Inject constructor(
                     }
                 }
             }
-            if (rows.isNotEmpty()) {
-                result.add(LedgerAccount(acct.id, acct.code, acct.name, rows, running))
+            if (rows.isNotEmpty() || kotlin.math.abs(opening) > 0.005) {
+                val withOpening = listOf(LedgerRow(from, "Opening balance", 0.0, 0.0, opening)) + rows
+                result.add(LedgerAccount(acct.id, acct.code, acct.name, withOpening, running))
             }
         }
         return result
@@ -358,22 +391,23 @@ class ReportsViewModel @Inject constructor(
     }
 
     fun computeExpenseAnalysis(from: String, to: String): ExpenseData {
-        val incomeAccounts = _uiState.value.accounts.filter { it.type == "income" || it.accountType.equals("Revenue", true) }
-        val revenueTotal = incomeAccounts.sumOf { kotlin.math.abs(balanceInRange(it.id, from, to).balance) }
+        // Operating revenue, signed (contra-revenue nets down the reference total).
+        val revenueTotal = _uiState.value.accounts.filter { isOperatingIncome(it) }
+            .sumOf { -balanceInRange(it.id, from, to).balance }
 
         val cogsAccounts = _uiState.value.accounts.filter { it.type == "cogs" }
         val expenseAccounts = _uiState.value.accounts.filter { it.type == "expense" }
 
         val cogsRows = cogsAccounts.map { acct ->
-            val amt = kotlin.math.abs(balanceInRange(acct.id, from, to).balance)
+            val amt = balanceInRange(acct.id, from, to).balance
             ExpenseRow("${acct.code} ${acct.name}", amt, if (revenueTotal > 0) (amt / revenueTotal) * 100 else 0.0, 0.0)
-        }
+        }.filter { it.amount != 0.0 }
         val cogsTotal = cogsRows.sumOf { it.amount }
 
         val expRows = expenseAccounts.map { acct ->
-            val amt = kotlin.math.abs(balanceInRange(acct.id, from, to).balance)
+            val amt = balanceInRange(acct.id, from, to).balance
             ExpenseRow("${acct.code} ${acct.name}", amt, if (revenueTotal > 0) (amt / revenueTotal) * 100 else 0.0, 0.0)
-        }
+        }.filter { it.amount != 0.0 }
         val expTotal = expRows.sumOf { it.amount }
 
         val allExpRows = expRows.map { r ->
@@ -383,8 +417,9 @@ class ReportsViewModel @Inject constructor(
     }
 
     fun computeRevenueAnalysis(from: String, to: String): RevenueData {
-        val incomeAccounts = _uiState.value.accounts.filter { it.type == "income" || it.accountType.equals("Revenue", true) }
-        val totalRevenue = incomeAccounts.sumOf { kotlin.math.abs(balanceInRange(it.id, from, to).balance) }
+        // Operating revenue only, signed so contra-revenue (returns/discounts) nets down.
+        val incomeAccounts = _uiState.value.accounts.filter { isOperatingIncome(it) }
+        val totalRevenue = incomeAccounts.sumOf { -balanceInRange(it.id, from, to).balance }
 
         val monthlyTrend = mutableListOf<Pair<String, Double>>()
         val endDate = LocalDate.parse(to)
@@ -393,7 +428,7 @@ class ReportsViewModel @Inject constructor(
             val monthEnd = monthStart.plusMonths(1).minusDays(1)
             val mFrom = monthStart.toString()
             val mTo = if (i == 0) to else monthEnd.toString()
-            val mRev = incomeAccounts.sumOf { kotlin.math.abs(balanceInRange(it.id, mFrom, mTo).balance) }
+            val mRev = incomeAccounts.sumOf { -balanceInRange(it.id, mFrom, mTo).balance }
             monthlyTrend.add("${monthStart.year}-${monthStart.monthValue.toString().padStart(2, '0')}" to mRev)
         }
 
@@ -403,7 +438,7 @@ class ReportsViewModel @Inject constructor(
         val avg12 = if (monthlyTrend.isNotEmpty()) monthlyTrend.sumOf { it.second } / monthlyTrend.size else 0.0
 
         val bySource = incomeAccounts.map { acct ->
-            ChartData("${acct.code} ${acct.name}", kotlin.math.abs(balanceInRange(acct.id, from, to).balance))
+            ChartData("${acct.code} ${acct.name}", -balanceInRange(acct.id, from, to).balance)
         }.filter { it.value > 0 }.sortedByDescending { it.value }
 
         return RevenueData(totalRevenue, currentMonth, prevMonth, momGrowth, avg12, currentMonth - avg12, monthlyTrend, bySource)
@@ -415,29 +450,39 @@ class ReportsViewModel @Inject constructor(
         } ?: return AgingData(0.0, emptyList(), emptyList())
 
         data class Charge(val date: String, val desc: String, var remaining: Double)
-        val charges = mutableListOf<Charge>()
-        var paymentPool = 0.0
+        // Group charges and payments by vendor so one vendor's payment can't settle another's
+        // invoice. Lines without a vendor id fall into a shared "unattributed" bucket.
+        val chargesByContact = mutableMapOf<String, MutableList<Charge>>()
+        val poolByContact = mutableMapOf<String, Double>()
 
         for (entry in _uiState.value.entries) {
             if (entry.entryDate > endDate) break
             for (line in _uiState.value.entryLines) {
                 if (line.journalEntryId == entry.id && line.accountId == apAccount.id) {
+                    val contact = line.vendorId ?: "unattributed"
                     if (line.credit > 0) {
-                        charges.add(Charge(entry.entryDate, entry.description ?: "", line.credit))
+                        chargesByContact.getOrPut(contact) { mutableListOf() }
+                            .add(Charge(entry.entryDate, entry.description ?: "", line.credit))
                     }
-                    if (line.debit > 0) paymentPool += line.debit
+                    if (line.debit > 0) poolByContact[contact] = (poolByContact[contact] ?: 0.0) + line.debit
                 }
             }
         }
 
-        // FIFO settlement
-        for (charge in charges) {
-            if (paymentPool > 0) {
-                val apply = minOf(charge.remaining, paymentPool)
+        // FIFO settlement within each contact (oldest charges first).
+        val charges = mutableListOf<Charge>()
+        for ((contact, list) in chargesByContact) {
+            list.sortBy { it.date }
+            var pool = poolByContact[contact] ?: 0.0
+            for (charge in list) {
+                if (pool <= 0) break
+                val apply = minOf(charge.remaining, pool)
                 charge.remaining -= apply
-                paymentPool -= apply
+                pool -= apply
             }
+            charges.addAll(list)
         }
+        charges.sortBy { it.date }
 
         val outstanding = charges.filter { it.remaining > 0.01 }
         val refDate = LocalDate.parse(endDate)
@@ -470,28 +515,38 @@ class ReportsViewModel @Inject constructor(
         } ?: return AgingData(0.0, emptyList(), emptyList())
 
         data class Charge(val date: String, val desc: String, var remaining: Double)
-        val charges = mutableListOf<Charge>()
-        var paymentPool = 0.0
+        // Group invoices and collections by customer so one customer's payment can't settle
+        // another's invoice. Lines without a customer id fall into a shared "unattributed" bucket.
+        val chargesByContact = mutableMapOf<String, MutableList<Charge>>()
+        val poolByContact = mutableMapOf<String, Double>()
 
         for (entry in _uiState.value.entries) {
             if (entry.entryDate > endDate) break
             for (line in _uiState.value.entryLines) {
                 if (line.journalEntryId == entry.id && line.accountId == arAccount.id) {
+                    val contact = line.customerId ?: "unattributed"
                     if (line.debit > 0) {
-                        charges.add(Charge(entry.entryDate, entry.description ?: "", line.debit))
+                        chargesByContact.getOrPut(contact) { mutableListOf() }
+                            .add(Charge(entry.entryDate, entry.description ?: "", line.debit))
                     }
-                    if (line.credit > 0) paymentPool += line.credit
+                    if (line.credit > 0) poolByContact[contact] = (poolByContact[contact] ?: 0.0) + line.credit
                 }
             }
         }
 
-        for (charge in charges) {
-            if (paymentPool > 0) {
-                val apply = minOf(charge.remaining, paymentPool)
+        val charges = mutableListOf<Charge>()
+        for ((contact, list) in chargesByContact) {
+            list.sortBy { it.date }
+            var pool = poolByContact[contact] ?: 0.0
+            for (charge in list) {
+                if (pool <= 0) break
+                val apply = minOf(charge.remaining, pool)
                 charge.remaining -= apply
-                paymentPool -= apply
+                pool -= apply
             }
+            charges.addAll(list)
         }
+        charges.sortBy { it.date }
 
         val outstanding = charges.filter { it.remaining > 0.01 }
         val refDate = LocalDate.parse(endDate)
@@ -519,15 +574,14 @@ class ReportsViewModel @Inject constructor(
     }
 
     fun computeTaxSummary(from: String, to: String): TaxData {
-        val incomeAccounts = _uiState.value.accounts.filter { it.type == "income" || it.accountType.equals("Revenue", true) }
-        val cogsAccounts = _uiState.value.accounts.filter { it.type == "cogs" }
-        val expenseAccounts = _uiState.value.accounts.filter { it.type == "expense" }
-
-        val revenue = incomeAccounts.sumOf { kotlin.math.abs(balanceInRange(it.id, from, to).balance) }
-        val cogs = cogsAccounts.sumOf { kotlin.math.abs(balanceInRange(it.id, from, to).balance) }
-        val expenses = expenseAccounts.sumOf { kotlin.math.abs(balanceInRange(it.id, from, to).balance) }
-        val grossProfit = revenue - cogs
-        val taxableIncome = grossProfit - expenses
+        // Reuse the corrected, signed P&L so taxable income = full accounting net income
+        // (nets contra accounts and includes other income/expense), consistent with the P&L.
+        val pnl = computePnL(from, to)
+        val revenue = pnl.revenueTotal
+        val cogs = pnl.cogsTotal
+        val expenses = pnl.expenseTotal
+        val grossProfit = pnl.grossProfit
+        val taxableIncome = pnl.netIncome
         val estimatedTax = if (taxableIncome > 0) taxableIncome * 0.30 else 0.0
 
         return TaxData(revenue, cogs, expenses, grossProfit, taxableIncome, estimatedTax)

@@ -786,6 +786,19 @@ fun TaxSummaryReport(viewModel: ReportsViewModel, from: String, to: String) {
             )
         }
 
+        Text(
+            text = "Rough estimate only — applies a flat 30% to accounting profit. It does not " +
+                "handle VAT/sales tax, withholding tax, capital allowances, loss carry-forward, " +
+                "or non-deductible items. Confirm with a qualified tax advisor for your jurisdiction.",
+            fontFamily = FigtreeFamily,
+            fontSize = 10.sp,
+            color = AppMutedText,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .background(AppAmberWarning.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
+                .padding(8.dp)
+        )
+
         Spacer(Modifier.height(16.dp))
 
         ChartCard("Tax Computation") {
