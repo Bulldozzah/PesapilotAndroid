@@ -165,6 +165,7 @@ private fun ReportCategoryCards(
                             ReportGroup.FINANCIAL -> "FINANCIAL"
                             ReportGroup.CONTROL -> "CONTROL"
                             ReportGroup.MANAGEMENT -> "MGMT"
+                            ReportGroup.CUSTOMER -> "CUST"
                             ReportGroup.TAX -> "TAX"
                         },
                         fontFamily = FigtreeFamily,
@@ -266,6 +267,7 @@ private fun ReportArea(
     endDate: String,
     viewModel: ReportsViewModel
 ) {
+    val uiState by viewModel.uiState.collectAsState()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -286,9 +288,54 @@ private fun ReportArea(
             ReportType.AP_AGING -> APAgingReport(viewModel, endDate)
             ReportType.AR_AGING -> ARAgingReport(viewModel, endDate)
             ReportType.TAX_SUMMARY -> TaxSummaryReport(viewModel, startDate, endDate)
+            ReportType.SALES_BY_CUSTOMER -> SalesByCustomerReport(viewModel, startDate, endDate)
+            ReportType.CUSTOMER_STATEMENT -> {
+                CustomerSelector(uiState.contacts, uiState.selectedCustomerId) { viewModel.selectCustomer(it) }
+                CustomerStatementReport(viewModel, uiState.selectedCustomerId, startDate, endDate)
+            }
+            ReportType.CUSTOMER_LEDGER -> {
+                CustomerSelector(uiState.contacts, uiState.selectedCustomerId) { viewModel.selectCustomer(it) }
+                CustomerLedgerReport(viewModel, uiState.selectedCustomerId)
+            }
+            ReportType.CUSTOMER_CREDIT -> CustomerCreditReport(viewModel, endDate)
+            ReportType.SALES_REGISTER -> SalesRegisterReport(viewModel, startDate, endDate)
+            ReportType.MONTHLY_SALES -> MonthlySalesReport(viewModel, startDate, endDate)
+            ReportType.INVENTORY_VALUATION -> InventoryValuationReport(viewModel, startDate, endDate)
         }
 
         Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun CustomerSelector(
+    contacts: List<com.example.pesapilotandroid.data.model.Contact>,
+    selectedId: String?,
+    onSelect: (String) -> Unit,
+) {
+    val customers = contacts.filter { it.type == "customer" }
+    var expanded by remember { mutableStateOf(false) }
+    val selectedName = customers.find { it.id == selectedId }?.name ?: "Select customer"
+    Box(modifier = Modifier.padding(bottom = 8.dp)) {
+        OutlinedCard(onClick = { expanded = true }, shape = RoundedCornerShape(8.dp)) {
+            Row(
+                modifier = Modifier.padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(Icons.Default.Person, null, tint = AppMutedText, modifier = Modifier.size(16.dp))
+                Text(selectedName, fontFamily = FigtreeFamily, fontSize = 12.sp, color = AppText)
+                Icon(Icons.Default.ArrowDropDown, null, tint = AppMutedText)
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (customers.isEmpty()) {
+                DropdownMenuItem(text = { Text("No customers yet", fontSize = 11.sp) }, onClick = { expanded = false })
+            }
+            customers.forEach { c ->
+                DropdownMenuItem(text = { Text(c.name, fontSize = 11.sp) }, onClick = { onSelect(c.id); expanded = false })
+            }
+        }
     }
 }
 

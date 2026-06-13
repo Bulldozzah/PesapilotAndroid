@@ -80,6 +80,7 @@ class ReportsViewModel @Inject constructor(
     fun setEndDate(date: String) = _uiState.update { it.copy(endDate = date) }
     fun selectReportGroup(group: ReportGroup) = _uiState.update { it.copy(selectedGroup = group) }
     fun selectReport(report: ReportType) = _uiState.update { it.copy(selectedReport = report) }
+    fun selectCustomer(id: String) = _uiState.update { it.copy(selectedCustomerId = id) }
 
     // ─── Core calculation functions ───────────────────────────────────────
 
@@ -586,12 +587,172 @@ class ReportsViewModel @Inject constructor(
 
         return TaxData(revenue, cogs, expenses, grossProfit, taxableIncome, estimatedTax)
     }
+
+    // ─── Customer / Sales / Inventory reports (from journal + contacts data) ───────────────
+
+    data class CustomerSalesRow(val name: String, val value: Double)
+    data class CustomerTxn(val date: String, val desc: String, val ref: String, val charge: Double, val payment: Double, val balance: Double)
+    data class CustomerStatementData(val name: String, val opening: Double, val invoiced: Double, val paid: Double, val balanceDue: Double, val rows: List<CustomerTxn>)
+    data class CustomerLedgerData(val name: String, val rows: List<CustomerTxn>, val balanceDue: Double)
+    data class CustomerCreditRow(val name: String, val outstanding: Double)
+    data class SalesRegisterRow(val date: String, val reference: String, val description: String, val customer: String, val amount: Double)
+    data class MonthlySalesData(val months: List<Pair<String, Double>>, val total: Double, val avg: Double, val best: Pair<String, Double>?)
+    data class InventoryRow(val name: String, val value: Double)
+    data class InventoryData(val rows: List<InventoryRow>, val total: Double, val avgInventory: Double, val cogs: Double, val turnover: Double)
+
+    private fun customerName(id: String?): String {
+        if (id == null) return "Unattributed"
+        return _uiState.value.contacts.find { it.id == id }?.name ?: "Unknown customer"
+    }
+
+    private fun isReceivable(a: ChartOfAccount): Boolean =
+        a.name.matches(Regex(".*accounts?\\s*receivable|\\breceivable\\b.*", RegexOption.IGNORE_CASE))
+
+    private data class RawArTxn(val date: String, val desc: String, val ref: String, val charge: Double, val payment: Double)
+
+    private fun arTxnsFor(customerId: String): List<RawArTxn> {
+        val arIds = _uiState.value.accounts.filter { isReceivable(it) }.map { it.id }.toSet()
+        val out = mutableListOf<RawArTxn>()
+        for (entry in _uiState.value.entries) {
+            for (line in _uiState.value.entryLines) {
+                if (line.journalEntryId == entry.id && line.customerId == customerId && line.accountId in arIds) {
+                    out.add(RawArTxn(entry.entryDate, entry.description ?: "", entry.reference ?: "", line.debit, line.credit))
+                }
+            }
+        }
+        return out.sortedBy { it.date }
+    }
+
+    /** Per entry: the customer it belongs to (first line with a customer id) and recognised revenue. */
+    private fun entrySales(entryId: String, accById: Map<String, ChartOfAccount>): Pair<String?, Double> {
+        var custId: String? = null
+        var revenue = 0.0
+        for (line in _uiState.value.entryLines) {
+            if (line.journalEntryId != entryId) continue
+            if (custId == null && line.customerId != null) custId = line.customerId
+            val acct = accById[line.accountId]
+            if (acct != null && isOperatingIncome(acct)) revenue += line.credit - line.debit
+        }
+        return custId to revenue
+    }
+
+    fun computeSalesByCustomer(from: String, to: String): List<CustomerSalesRow> {
+        val accById = _uiState.value.accounts.associateBy { it.id }
+        val totals = mutableMapOf<String, Double>()
+        for (entry in _uiState.value.entries) {
+            if (entry.entryDate < from || entry.entryDate > to) continue
+            val (custId, rev) = entrySales(entry.id, accById)
+            if (kotlin.math.abs(rev) < 0.005) continue
+            val key = custId ?: "__none__"
+            totals[key] = (totals[key] ?: 0.0) + rev
+        }
+        return totals.map { (id, v) -> CustomerSalesRow(if (id == "__none__") "Unattributed" else customerName(id), v) }
+            .filter { kotlin.math.abs(it.value) > 0.005 }
+            .sortedByDescending { it.value }
+    }
+
+    fun computeCustomerLedger(customerId: String): CustomerLedgerData {
+        var running = 0.0
+        val rows = arTxnsFor(customerId).map {
+            running += it.charge - it.payment
+            CustomerTxn(it.date, it.desc, it.ref, it.charge, it.payment, running)
+        }
+        return CustomerLedgerData(customerName(customerId), rows, running)
+    }
+
+    fun computeCustomerStatement(customerId: String, from: String, to: String): CustomerStatementData {
+        val all = arTxnsFor(customerId)
+        val opening = all.filter { it.date < from }.sumOf { it.charge - it.payment }
+        val period = all.filter { it.date in from..to }
+        val invoiced = period.sumOf { it.charge }
+        val paid = period.sumOf { it.payment }
+        var run = opening
+        val rows = period.map {
+            run += it.charge - it.payment
+            CustomerTxn(it.date, it.desc, it.ref, it.charge, it.payment, run)
+        }
+        return CustomerStatementData(customerName(customerId), opening, invoiced, paid, opening + invoiced - paid, rows)
+    }
+
+    fun computeCustomerCredit(endDate: String): List<CustomerCreditRow> {
+        val arIds = _uiState.value.accounts.filter { isReceivable(it) }.map { it.id }.toSet()
+        val bal = mutableMapOf<String, Double>()
+        for (entry in _uiState.value.entries) {
+            if (entry.entryDate > endDate) continue
+            for (line in _uiState.value.entryLines) {
+                val cust = line.customerId
+                if (line.journalEntryId == entry.id && cust != null && line.accountId in arIds) {
+                    bal[cust] = (bal[cust] ?: 0.0) + line.debit - line.credit
+                }
+            }
+        }
+        return bal.map { CustomerCreditRow(customerName(it.key), it.value) }
+            .filter { kotlin.math.abs(it.outstanding) > 0.005 }
+            .sortedByDescending { it.outstanding }
+    }
+
+    fun computeSalesRegister(from: String, to: String): List<SalesRegisterRow> {
+        val accById = _uiState.value.accounts.associateBy { it.id }
+        return _uiState.value.entries
+            .filter { it.entryDate in from..to }
+            .map { e -> Triple(e, entrySales(e.id, accById).first, entrySales(e.id, accById).second) }
+            .filter { kotlin.math.abs(it.third) > 0.005 }
+            .sortedBy { it.first.entryDate }
+            .map { (e, cust, rev) -> SalesRegisterRow(e.entryDate, e.reference ?: "", e.description ?: "", customerName(cust), rev) }
+    }
+
+    fun computeMonthlySales(from: String, to: String): MonthlySalesData {
+        val incomeAccounts = _uiState.value.accounts.filter { isOperatingIncome(it) }
+        val start = LocalDate.parse(from)
+        val end = LocalDate.parse(to)
+        val months = mutableListOf<Pair<String, Double>>()
+        var cur = start.withDayOfMonth(1)
+        var guard = 0
+        while (!cur.isAfter(end) && guard++ < 120) {
+            val mStart = cur
+            val mEnd = cur.plusMonths(1).minusDays(1)
+            val f = if (mStart.isBefore(start)) start else mStart
+            val t = if (mEnd.isAfter(end)) end else mEnd
+            val v = incomeAccounts.sumOf { -balanceInRange(it.id, f.toString(), t.toString()).balance }
+            months.add("${mStart.year}-${mStart.monthValue.toString().padStart(2, '0')}" to v)
+            cur = cur.plusMonths(1)
+        }
+        val total = months.sumOf { it.second }
+        val avg = if (months.isNotEmpty()) total / months.size else 0.0
+        val best = months.maxByOrNull { it.second }
+        return MonthlySalesData(months, total, avg, best)
+    }
+
+    fun computeInventoryValuation(endDate: String, from: String, to: String): InventoryData {
+        val invAccts = _uiState.value.accounts.filter { a ->
+            a.type == "asset" && (
+                a.name.matches(Regex(".*(inventory|raw material|work.?in.?progress|finished goods|\\bstock\\b|\\bwip\\b).*", RegexOption.IGNORE_CASE)) ||
+                a.code.matches(Regex("^12\\d{2}$"))
+            )
+        }
+        val rows = invAccts.map { InventoryRow("${it.code} ${it.name}", balanceUpTo(it.id, endDate).balance) }
+            .filter { kotlin.math.abs(it.value) > 0.005 }
+        val total = rows.sumOf { it.value }
+        val opening = invAccts.sumOf { balanceUpTo(it.id, dayBefore(from)).balance }
+        val avgInv = (opening + total) / 2
+        val cogs = computePnL(from, to).cogsTotal
+        val turnover = if (avgInv > 0) cogs / avgInv else 0.0
+        return InventoryData(rows, total, avgInv, cogs, turnover)
+    }
 }
 
 enum class ReportGroup(val label: String, val reports: List<ReportType>) {
     FINANCIAL("Financial Statements", listOf(ReportType.INCOME_STATEMENT, ReportType.BALANCE_SHEET, ReportType.CASH_FLOW)),
     CONTROL("Control Reports", listOf(ReportType.TRIAL_BALANCE, ReportType.GENERAL_LEDGER, ReportType.JOURNAL_REPORT)),
     MANAGEMENT("Management Reports", listOf(ReportType.EXPENSE_ANALYSIS, ReportType.REVENUE_ANALYSIS, ReportType.AP_AGING, ReportType.AR_AGING)),
+    CUSTOMER(
+        "Customer & Sales",
+        listOf(
+            ReportType.SALES_BY_CUSTOMER, ReportType.CUSTOMER_STATEMENT, ReportType.CUSTOMER_LEDGER,
+            ReportType.CUSTOMER_CREDIT, ReportType.SALES_REGISTER, ReportType.MONTHLY_SALES,
+            ReportType.INVENTORY_VALUATION,
+        ),
+    ),
     TAX("Tax & Compliance", listOf(ReportType.TAX_SUMMARY))
 }
 
@@ -606,6 +767,13 @@ enum class ReportType(val label: String, val group: ReportGroup) {
     REVENUE_ANALYSIS("Revenue Analysis", ReportGroup.MANAGEMENT),
     AP_AGING("A/P Aging", ReportGroup.MANAGEMENT),
     AR_AGING("A/R Aging", ReportGroup.MANAGEMENT),
+    SALES_BY_CUSTOMER("Sales by Customer", ReportGroup.CUSTOMER),
+    CUSTOMER_STATEMENT("Customer Statement", ReportGroup.CUSTOMER),
+    CUSTOMER_LEDGER("Customer Ledger", ReportGroup.CUSTOMER),
+    CUSTOMER_CREDIT("Customer Credit / Outstanding", ReportGroup.CUSTOMER),
+    SALES_REGISTER("Sales Register", ReportGroup.CUSTOMER),
+    MONTHLY_SALES("Monthly Sales Summary", ReportGroup.CUSTOMER),
+    INVENTORY_VALUATION("Inventory Valuation & Turnover", ReportGroup.CUSTOMER),
     TAX_SUMMARY("Tax Summary", ReportGroup.TAX)
 }
 
@@ -620,5 +788,6 @@ data class ReportsUiState(
     val startDate: String = "",
     val endDate: String = "",
     val selectedGroup: ReportGroup = ReportGroup.FINANCIAL,
-    val selectedReport: ReportType = ReportType.INCOME_STATEMENT
+    val selectedReport: ReportType = ReportType.INCOME_STATEMENT,
+    val selectedCustomerId: String? = null,
 )

@@ -817,6 +817,161 @@ fun TaxSummaryReport(viewModel: ReportsViewModel, from: String, to: String) {
     }
 }
 
+// ─── Customer & Sales reports ─────────────────────────────────────────────
+
+@Composable
+private fun MutedNote(text: String) {
+    Text(text, fontFamily = FigtreeFamily, fontSize = 11.sp, color = AppMutedText, modifier = Modifier.padding(vertical = 4.dp))
+}
+
+@Composable
+fun SalesByCustomerReport(viewModel: ReportsViewModel, from: String, to: String) {
+    val rows = remember(from, to) { viewModel.computeSalesByCustomer(from, to) }
+    if (rows.isEmpty()) { MutedNote("No customer-attributed sales in this period. Tag a journal line with a customer (on the sale or A/R line) to populate this."); return }
+    val total = rows.sumOf { it.value }
+    Column {
+        rows.forEach { r ->
+            ReportRow(r.name, "${fmt(r.value)}   ${if (total != 0.0) "%.1f".format(r.value / total * 100) else "0"}%")
+        }
+        ReportRow("Total", fmt(total), isBold = true)
+        Spacer(Modifier.height(12.dp))
+        ChartCard("Top customers") {
+            HorizontalBarChart(data = rows.take(8).map { it.name to it.value }, barColor = AppPrimary)
+        }
+    }
+}
+
+@Composable
+private fun TxnTable(rows: List<ReportsViewModel.CustomerTxn>, opening: Double?) {
+    Row(modifier = Modifier.fillMaxWidth().background(AppPrimary.copy(alpha = 0.06f), RoundedCornerShape(6.dp)).padding(6.dp)) {
+        Text("Date", Modifier.weight(0.22f), fontFamily = FigtreeFamily, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = AppText)
+        Text("Description", Modifier.weight(0.30f), fontFamily = FigtreeFamily, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = AppText)
+        Text("Invoice", Modifier.weight(0.16f), fontFamily = FigtreeFamily, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = AppText)
+        Text("Payment", Modifier.weight(0.16f), fontFamily = FigtreeFamily, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = AppText)
+        Text("Balance", Modifier.weight(0.16f), fontFamily = FigtreeFamily, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = AppText)
+    }
+    if (opening != null) {
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp, horizontal = 4.dp)) {
+            Text("—", Modifier.weight(0.22f), fontFamily = FigtreeFamily, fontSize = 9.sp, color = AppMutedText)
+            Text("Opening balance", Modifier.weight(0.30f), fontFamily = FigtreeFamily, fontSize = 9.sp, color = AppMutedText)
+            Text("", Modifier.weight(0.16f)); Text("", Modifier.weight(0.16f))
+            Text(fmt(opening), Modifier.weight(0.16f), fontFamily = FigtreeFamily, fontSize = 9.sp, color = AppText)
+        }
+    }
+    rows.forEach { t ->
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp, horizontal = 4.dp)) {
+            Text(t.date, Modifier.weight(0.22f), fontFamily = FigtreeFamily, fontSize = 9.sp, color = AppMutedText, maxLines = 1)
+            Text(t.desc.take(18), Modifier.weight(0.30f), fontFamily = FigtreeFamily, fontSize = 9.sp, color = AppText, maxLines = 1)
+            Text(if (t.charge > 0) fmt(t.charge) else "", Modifier.weight(0.16f), fontFamily = FigtreeFamily, fontSize = 9.sp, color = AppGreenSuccess)
+            Text(if (t.payment > 0) fmt(t.payment) else "", Modifier.weight(0.16f), fontFamily = FigtreeFamily, fontSize = 9.sp, color = AppRedDestructive)
+            Text(fmt(t.balance), Modifier.weight(0.16f), fontFamily = FigtreeFamily, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = AppText)
+        }
+    }
+}
+
+@Composable
+fun CustomerStatementReport(viewModel: ReportsViewModel, customerId: String?, from: String, to: String) {
+    if (customerId == null) { MutedNote("Select a customer above to view their statement."); return }
+    val data = remember(customerId, from, to) { viewModel.computeCustomerStatement(customerId, from, to) }
+    Column {
+        Text(data.name, fontFamily = OutfitFamily, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = AppText)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatCard("Opening", fmt(data.opening), Modifier.weight(1f))
+            StatCard("Invoiced", fmt(data.invoiced), Modifier.weight(1f))
+            StatCard("Paid", fmt(data.paid), Modifier.weight(1f), isSuccess = true)
+            StatCard("Due", fmt(data.balanceDue), Modifier.weight(1f), isDestructive = data.balanceDue > 0.005)
+        }
+        Spacer(Modifier.height(12.dp))
+        TxnTable(data.rows, opening = data.opening)
+        Spacer(Modifier.height(8.dp))
+        Text("Please remit the balance due of ${fmt(data.balanceDue)}. Thank you for your business.", fontFamily = FigtreeFamily, fontSize = 11.sp, color = AppMutedText)
+    }
+}
+
+@Composable
+fun CustomerLedgerReport(viewModel: ReportsViewModel, customerId: String?) {
+    if (customerId == null) { MutedNote("Select a customer above to view their ledger."); return }
+    val data = remember(customerId) { viewModel.computeCustomerLedger(customerId) }
+    Column {
+        Text(data.name, fontFamily = OutfitFamily, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = AppText)
+        Spacer(Modifier.height(8.dp))
+        if (data.rows.isEmpty()) MutedNote("No receivable transactions for this customer.")
+        else TxnTable(data.rows, opening = null)
+        Spacer(Modifier.height(8.dp))
+        ReportRow("Current balance due", fmt(data.balanceDue), isBold = true, isDestructive = data.balanceDue > 0.005, isSuccess = data.balanceDue <= 0.005)
+    }
+}
+
+@Composable
+fun CustomerCreditReport(viewModel: ReportsViewModel, endDate: String) {
+    val rows = remember(endDate) { viewModel.computeCustomerCredit(endDate) }
+    Column {
+        MutedNote("Credit limits aren't stored yet — this shows each customer's current outstanding receivable balance.")
+        if (rows.isEmpty()) { MutedNote("No outstanding customer balances."); return }
+        rows.forEach { ReportRow(it.name, fmt(it.outstanding)) }
+        ReportRow("Total receivable", fmt(rows.sumOf { it.outstanding }), isBold = true)
+    }
+}
+
+@Composable
+fun SalesRegisterReport(viewModel: ReportsViewModel, from: String, to: String) {
+    val rows = remember(from, to) { viewModel.computeSalesRegister(from, to) }
+    if (rows.isEmpty()) { MutedNote("No sales recorded in this period."); return }
+    Column {
+        Row(modifier = Modifier.fillMaxWidth().background(AppPrimary.copy(alpha = 0.06f), RoundedCornerShape(6.dp)).padding(6.dp)) {
+            Text("Date", Modifier.weight(0.24f), fontFamily = FigtreeFamily, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = AppText)
+            Text("Customer", Modifier.weight(0.34f), fontFamily = FigtreeFamily, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = AppText)
+            Text("Description", Modifier.weight(0.26f), fontFamily = FigtreeFamily, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = AppText)
+            Text("Amount", Modifier.weight(0.16f), fontFamily = FigtreeFamily, fontWeight = FontWeight.SemiBold, fontSize = 9.sp, color = AppText)
+        }
+        rows.forEach { r ->
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp, horizontal = 4.dp)) {
+                Text(r.date, Modifier.weight(0.24f), fontFamily = FigtreeFamily, fontSize = 9.sp, color = AppMutedText, maxLines = 1)
+                Text(r.customer.take(16), Modifier.weight(0.34f), fontFamily = FigtreeFamily, fontSize = 9.sp, color = AppText, maxLines = 1)
+                Text(r.description.take(14), Modifier.weight(0.26f), fontFamily = FigtreeFamily, fontSize = 9.sp, color = AppMutedText, maxLines = 1)
+                Text(fmt(r.amount), Modifier.weight(0.16f), fontFamily = FigtreeFamily, fontSize = 9.sp, color = AppText)
+            }
+        }
+        ReportRow("Total sales", fmt(rows.sumOf { it.amount }), isBold = true)
+    }
+}
+
+@Composable
+fun MonthlySalesReport(viewModel: ReportsViewModel, from: String, to: String) {
+    val data = remember(from, to) { viewModel.computeMonthlySales(from, to) }
+    Column {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatCard("Total Sales", fmt(data.total), Modifier.weight(1f))
+            StatCard("Monthly Avg", fmt(data.avg), Modifier.weight(1f))
+            StatCard("Best Month", data.best?.let { "${it.first}" } ?: "—", Modifier.weight(1f), isSuccess = true)
+        }
+        Spacer(Modifier.height(12.dp))
+        data.months.forEach { ReportRow(it.first, fmt(it.second)) }
+        ReportRow("Total", fmt(data.total), isBold = true)
+        Spacer(Modifier.height(12.dp))
+        if (data.months.isNotEmpty()) ChartCard("Sales trend") { BarChart(data = data.months, barColor = AppGreenSuccess) }
+    }
+}
+
+@Composable
+fun InventoryValuationReport(viewModel: ReportsViewModel, from: String, to: String) {
+    val data = remember(from, to) { viewModel.computeInventoryValuation(to, from, to) }
+    Column {
+        MutedNote("From inventory asset accounts in the ledger (accounting value). Per-item quantities, stock movement, reorder levels and counts need a product/inventory module, which isn't part of the current data model.")
+        if (data.rows.isEmpty()) { MutedNote("No inventory asset accounts with a balance."); }
+        data.rows.forEach { ReportRow(it.name, fmt(it.value)) }
+        ReportRow("Total inventory on hand", fmt(data.total), isBold = true)
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatCard("Avg Inventory", fmt(data.avgInventory), Modifier.weight(1f))
+            StatCard("COGS (period)", fmt(data.cogs), Modifier.weight(1f))
+            StatCard("Turnover", "%.2f×".format(data.turnover), Modifier.weight(1f), isSuccess = data.turnover >= 1.0)
+        }
+        MutedNote("Inventory turnover = COGS ÷ average inventory. Higher = stock sells faster; lower = cash tied up in slow movers.")
+    }
+}
+
 // ─── Collapsible Section Helper ────────────────────────────────────────────
 
 @Composable
